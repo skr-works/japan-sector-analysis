@@ -49,7 +49,7 @@ def process_data_for_chart(data):
     取得したデータを加工する
     """
     if not data:
-        return None, None, None
+        return None, None, None, None
 
     # DataFrame化
     df = pd.DataFrame(data)
@@ -57,62 +57,94 @@ def process_data_for_chart(data):
     # 日付型変換
     df['日付'] = pd.to_datetime(df['日付'])
 
-    # --- 重複データの排除 (追加修正) ---
-    # 同一日に複数回実行された場合などに重複が発生し、pivotでエラーになるのを防ぐ
-    # 更新日時があればそれを基準にソート、なければ読み込み順で
+    # --- 重複データの排除 ---
     sort_cols = ['日付', 'コード']
     if '更新日時' in df.columns:
         sort_cols.append('更新日時')
         
     df = df.sort_values(sort_cols)
-    
-    # 日付とコードの組み合わせが重複している場合、最後の行（最新）を残す
     df = df.drop_duplicates(subset=['日付', 'コード'], keep='last')
 
     # --- 1. 最新データの抽出 (パネル用) ---
-    # 各コードごとの最新行を取得する
+    # 各コードごとの最新行を取得
     latest_df = df.sort_values('日付').groupby('コード').tail(1).copy()
-    
-    # 表示順をコード順またはセクター名順に整える（ここではコード順）
     latest_df = latest_df.sort_values('コード')
 
     # --- 2. 時系列データの作成 (チャート用) ---
-    # ピボットテーブル作成 (行:日付, 列:セクター名, 値:現在値)
     pivot_df = df.pivot(index='日付', columns='セクター名', values='現在値')
-    
-    # 直近300日分を取得
     pivot_df = pivot_df.tail(300)
     
-    # データが空でなければ指数化 (起点=100)
     if not pivot_df.empty:
         base_prices = pivot_df.iloc[0]
-        # 0除算回避
         normalized_df = pivot_df.div(base_prices).mul(100).round(2)
     else:
         normalized_df = pivot_df
 
-    # Chart.js用に日付ラベルを文字列リスト化
-    chart_labels = normalized_df.index.strftime('%Y/%m/%d').tolist()
+    # --- 3. 過熱ランキングTop3の作成 ---
+    overheated_sectors = []
     
-    # Chart.js用にデータセットリスト化
+    if not latest_df.empty and not normalized_df.empty:
+        for _, row in latest_df.iterrows():
+            sector = row['セクター名']
+            rsi = float(row['RSI'])
+            bb = float(row['BB%B(過熱)'])
+            
+            # 過熱条件
+            if rsi >= 70 or bb > 1.0:
+                current_index_val = 0
+                if sector in normalized_df.columns:
+                    current_index_val = normalized_df[sector].iloc[-1]
+                
+                overheated_sectors.append({
+                    'sector': sector,
+                    'index_val': current_index_val,
+                    'rsi': rsi
+                })
+        
+        overheated_sectors.sort(key=lambda x: x['index_val'], reverse=True)
+        overheated_top3 = overheated_sectors[:3]
+    else:
+        overheated_top3 = []
+
+    # Chart.js用データ
+    chart_labels = normalized_df.index.strftime('%Y/%m/%d').tolist()
     chart_datasets = []
     
-    # 色のリスト (視認性の高い色パレット)
+    # --- 色のリスト修正 (High Contrast) ---
+    # 白背景で見にくい黄色や薄い色を排除し、濃い色を中心に構成
     colors = [
-        '#e6194b', '#3cb44b', '#ffe119', '#4363d8', '#f58231', 
-        '#911eb4', '#46f0f0', '#f032e6', '#bcf60c', '#fabebe', 
-        '#008080', '#e6beff', '#9a6324', '#fffac8', '#800000', 
-        '#aaffc3', '#808000', '#ffd8b1', '#000075', '#808080'
+        '#e6194b', # 赤
+        '#3cb44b', # 緑
+        '#9a6324', # 茶色 (黄色の代わり)
+        '#4363d8', # 青
+        '#f58231', # オレンジ
+        '#911eb4', # 紫
+        '#008080', # ティール (シアンの代わり)
+        '#f032e6', # マゼンタ
+        '#800000', # マルーン (ライムの代わり)
+        '#000075', # ネイビー (ピンクの代わり)
+        '#808000', # オリーブ
+        '#000000', # 黒
+        '#dcbeff', # ライラック (少し薄いが識別可能)
+        '#a9a9a9', # ダークグレー
+        '#fffac8', # ベージュ (※削除対象、後述でスキップされるか確認) -> 下記で上書き
+    ]
+    # より確実な視認性の高いパレット (Tableau10 + Dark variants)
+    colors = [
+        '#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', 
+        '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf',
+        '#393b79', '#637939', '#8c6d31', '#843c39', '#7b4173',
+        '#5254a3', '#8ca252', '#bd9e39', '#ad494a', '#a55194'
     ]
     
     for i, column in enumerate(normalized_df.columns):
         color = colors[i % len(colors)]
         dataset = {
             "label": column,
-            "data": normalized_df[column].fillna(method='ffill').tolist(), # 欠損値は前日埋め
+            "data": normalized_df[column].fillna(method='ffill').tolist(),
             "borderColor": color,
             "backgroundColor": color,
-            "borderWidth": 1.5,
+            "borderWidth": 2, # 線を少し太くして見やすく
             "pointRadius": 0,
             "pointHoverRadius": 4,
             "fill": False,
@@ -120,29 +152,29 @@ def process_data_for_chart(data):
         }
         chart_datasets.append(dataset)
 
-    return latest_df, chart_labels, chart_datasets
+    return latest_df, chart_labels, chart_datasets, overheated_top3
 
-def generate_html_content(latest_df, chart_labels, chart_datasets):
+def generate_html_content(latest_df, chart_labels, chart_datasets, overheated_top3):
     """HTMLコンテンツ（パネル＋Chart.jsスクリプト）を生成"""
     
     if latest_df is None or latest_df.empty:
         return "<p>データがありません。</p>"
 
-    # 更新日時（データの最新日付を使用）
+    # 更新日時
     last_update_str = latest_df['日付'].max().strftime('%Y-%m-%d')
-
-    # 一意なID生成（キャッシュ対策）
     chart_id = f"sectorChart_{random.randint(1000, 9999)}"
 
     # --- CSS (インライン) ---
     style_grid = "display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 30px;"
-    # パネルは白背景、影付きで見やすく
     style_card = "padding: 12px; border-radius: 6px; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.1); border: 1px solid #eee;"
 
     html = f"""
     <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 800px; margin: 0 auto;">
         <p style="text-align: right; font-size: 0.8rem; color: #666; margin-bottom: 10px;">データ更新日: {last_update_str}</p>
         
+        <!-- パネルエリア見出し (絵文字削除) -->
+        <h3 style="font-size: 1.1rem; border-left: 5px solid #d32f2f; padding-left: 10px; margin-bottom: 15px; color: #333;">業種別トレンド・シグナル一覧</h3>
+
         <!-- パネルエリア -->
         <div style="{style_grid}">
     """
@@ -153,22 +185,20 @@ def generate_html_content(latest_df, chart_labels, chart_datasets):
         rsi = float(row['RSI'])
         bb = float(row['BB%B(過熱)'])
         
-        # --- ステータス判定 ---
-        # 背景色は白固定。文字と枠線でステータスを表示
+        # --- ステータス判定 (絵文字削除) ---
         status_text = "通常"
         status_style = "color: #666; font-size: 0.75rem; background: #f0f0f0; padding: 2px 6px; border-radius: 3px;"
         
         # 過熱判定
         if rsi >= 70 or bb > 1.0:
-            status_text = "🔥 過熱"
+            status_text = "過熱" # 絵文字削除
             status_style = "color: #d32f2f; font-weight: bold; font-size: 0.75rem; background: #ffebee; padding: 2px 6px; border-radius: 3px; border: 1px solid #ffcdd2;"
             
         # 割安判定
         elif rsi <= 30 or bb < 0:
-            status_text = "❄️ 割安"
+            status_text = "割安" # 絵文字削除
             status_style = "color: #1565c0; font-weight: bold; font-size: 0.75rem; background: #e3f2fd; padding: 2px 6px; border-radius: 3px; border: 1px solid #bbdefb;"
 
-        # 前日比の文字色
         change_color = "#d32f2f" if change > 0 else ("#1976d2" if change < 0 else "#333")
         sign = "+" if change > 0 else ""
         
@@ -186,14 +216,29 @@ def generate_html_content(latest_df, chart_labels, chart_datasets):
         </div>
         """
 
-    # PythonデータをJSON文字列化してJSに埋め込む
     json_labels = json.dumps(chart_labels)
     json_datasets = json.dumps(chart_datasets)
 
+    # 過熱Top3 (絵文字削除)
+    top3_html = ""
+    if overheated_top3:
+        top3_html += '<div style="background: #fff3e0; padding: 12px; border-radius: 6px; margin-bottom: 20px; border: 1px solid #ffe0b2;">'
+        top3_html += '<div style="font-weight:bold; color:#e65100; margin-bottom:8px; font-size:0.95rem;">上昇トレンド × 過熱シグナル発生中 (Top 3)</div>'
+        top3_html += '<ul style="margin: 0; padding-left: 20px; color: #333; font-size: 0.9rem;">'
+        for item in overheated_top3:
+            idx_val = round(item['index_val'], 1)
+            top3_html += f"<li><strong>{item['sector']}</strong> <span style='color:#666; font-size:0.85rem;'>(300日指数: {idx_val} / RSI: {item['rsi']})</span></li>"
+        top3_html += '</ul></div>'
+    else:
+        top3_html += '<div style="background: #f9f9f9; padding: 10px; border-radius: 6px; margin-bottom: 20px; border: 1px solid #eee; color: #666; font-size: 0.9rem;">現在、過熱圏にある業種はありません。</div>'
+
     html += f"""
         </div>
-        <!-- チャートエリア -->
-        <h3 style="font-size: 1.1rem; border-bottom: 2px solid #333; padding-bottom: 5px; margin-top: 40px; margin-bottom: 15px;">📊 300日推移チャート (起点=100)</h3>
+        <!-- チャートエリア (絵文字削除) -->
+        <h3 style="font-size: 1.1rem; border-left: 5px solid #333; padding-left: 10px; margin-top: 40px; margin-bottom: 15px; color: #333;">300日パフォーマンス推移チャート (起点=100)</h3>
+        
+        {top3_html}
+
         <p style="font-size: 0.8rem; color: #666; margin-bottom: 15px;">
             ※300営業日前を100とした指数チャートです。<br>
             ※凡例の四角(■)をタップすると、その業種の表示/非表示を切り替えられます。
@@ -321,10 +366,10 @@ if __name__ == "__main__":
         raw_data = get_sheet_data()
         
         print("データを加工中(パネル＆チャート)...")
-        latest_df, chart_labels, chart_datasets = process_data_for_chart(raw_data)
+        latest_df, chart_labels, chart_datasets, overheated_top3 = process_data_for_chart(raw_data)
         
         print("HTMLコンテンツ生成中...")
-        html_content = generate_html_content(latest_df, chart_labels, chart_datasets)
+        html_content = generate_html_content(latest_df, chart_labels, chart_datasets, overheated_top3)
         
         update_wordpress(html_content)
         

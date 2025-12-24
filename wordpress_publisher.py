@@ -54,12 +54,23 @@ def process_data_for_chart(data):
     # DataFrame化
     df = pd.DataFrame(data)
     
-    # 日付型変換とソート
+    # 日付型変換
     df['日付'] = pd.to_datetime(df['日付'])
-    df = df.sort_values(['日付', 'コード'])
+
+    # --- 重複データの排除 (追加修正) ---
+    # 同一日に複数回実行された場合などに重複が発生し、pivotでエラーになるのを防ぐ
+    # 更新日時があればそれを基準にソート、なければ読み込み順で
+    sort_cols = ['日付', 'コード']
+    if '更新日時' in df.columns:
+        sort_cols.append('更新日時')
+        
+    df = df.sort_values(sort_cols)
+    
+    # 日付とコードの組み合わせが重複している場合、最後の行（最新）を残す
+    df = df.drop_duplicates(subset=['日付', 'コード'], keep='last')
 
     # --- 1. 最新データの抽出 (パネル用) ---
-    # 修正: 全体でのMax日付ではなく、各コードごとの最新行を取得する（更新ズレによる欠落防止）
+    # 各コードごとの最新行を取得する
     latest_df = df.sort_values('日付').groupby('コード').tail(1).copy()
     
     # 表示順をコード順またはセクター名順に整える（ここではコード順）

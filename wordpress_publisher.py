@@ -137,10 +137,8 @@ def generate_html_content(latest_df, chart_labels, chart_datasets, overheated_to
     <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 800px; margin: 0 auto;">
         <p style="text-align: right; font-size: 0.8rem; color: #666; margin-bottom: 10px;">データ更新日: {last_update_str}</p>
         
-        <!-- パネルエリア見出し (装飾なし) -->
         <h3 style="font-size: 1.1rem; margin-bottom: 15px; color: #333;">短期の過熱割安判定パネル</h3>
 
-        <!-- パネルエリア -->
         <div style="{style_grid}">
     """
 
@@ -150,29 +148,41 @@ def generate_html_content(latest_df, chart_labels, chart_datasets, overheated_to
         rsi = float(row['RSI'])
         bb = float(row['BB%B(過熱)'])
         
-        # --- ステータス判定 ---
-        status_text = "通常"
-        status_style = "color: #666; font-size: 0.75rem; background: #f0f0f0; padding: 2px 6px; border-radius: 3px;"
+        # --- ステータス判定 (変更箇所) ---
         
-        # 過熱判定
+        # デフォルト（通常）: 元のままに近い控えめな表示
+        status_text = "通常"
+        status_style = "color: #aaa; font-size: 0.7rem; background: #f7f7f7; padding: 2px 6px; border-radius: 4px; display: inline-block;"
+        
+        # 過熱判定: 文字サイズ大(1.1rem)、太字(900)、赤背景、白文字、影付き
         if rsi >= 70 or bb > 1.0:
             status_text = "過熱"
-            status_style = "color: #d32f2f; font-weight: bold; font-size: 0.75rem; background: #ffebee; padding: 2px 6px; border-radius: 3px; border: 1px solid #ffcdd2;"
+            status_style = (
+                "color: #fff; font-weight: 900; font-size: 1.1rem; "
+                "background: #d32f2f; padding: 6px 12px; border-radius: 6px; "
+                "box-shadow: 0 3px 6px rgba(211, 47, 47, 0.4); "
+                "display: inline-block; transform: scale(1.05);"
+            )
             
-        # 割安判定
+        # 割安判定: 文字サイズ大(1.1rem)、太字(900)、青背景、白文字、影付き
         elif rsi <= 30 or bb < 0:
             status_text = "割安"
-            status_style = "color: #1565c0; font-weight: bold; font-size: 0.75rem; background: #e3f2fd; padding: 2px 6px; border-radius: 3px; border: 1px solid #bbdefb;"
+            status_style = (
+                "color: #fff; font-weight: 900; font-size: 1.1rem; "
+                "background: #1976d2; padding: 6px 12px; border-radius: 6px; "
+                "box-shadow: 0 3px 6px rgba(25, 118, 210, 0.4); "
+                "display: inline-block; transform: scale(1.05);"
+            )
 
         change_color = "#d32f2f" if change > 0 else ("#1976d2" if change < 0 else "#333")
         sign = "+" if change > 0 else ""
         
-        # パネルHTML
+        # パネルHTML (変更箇所: align-itemsをcenterにして配置調整)
         html += f"""
         <div style="{style_card}">
             <div style="font-weight: bold; font-size: 0.95rem; color: #333; margin-bottom: 8px;">{sector}</div>
             
-            <div style="display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 8px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
                 <div>
                     <div style="font-size: 0.7rem; color: #888; margin-bottom: 2px;">ETF価格前日比</div>
                     <div style="font-size: 1.4rem; font-weight: bold; color: {change_color}; line-height: 1;">
@@ -180,7 +190,7 @@ def generate_html_content(latest_df, chart_labels, chart_datasets, overheated_to
                     </div>
                 </div>
                 <div style="text-align: right;">
-                    <div style="{status_style}; display: inline-block;">{status_text}</div>
+                    <div style="{status_style}">{status_text}</div>
                 </div>
             </div>
             
@@ -222,19 +232,16 @@ def generate_html_content(latest_df, chart_labels, chart_datasets, overheated_to
         top3_html += '<div style="background: #f9f9f9; padding: 10px; border-radius: 6px; margin-bottom: 20px; border: 1px solid #eee; color: #666; font-size: 0.9rem;">現在、過熱圏にある業種はありません。</div>'
 
     html += f"""
-        <!-- チャートエリア見出し (装飾なし) -->
         <h3 style="font-size: 1.1rem; margin-top: 40px; margin-bottom: 15px; color: #333;">長期の過熱割安判定チャート(起点100)</h3>
         
         {top3_html}
         
-        <!-- Chart.js CDN -->
         <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
         
         <div style="position: relative; width: 100%; height: 500px; border: 1px solid #eee; border-radius: 4px; padding: 5px;">
             <canvas id="{chart_id}"></canvas>
         </div>
         
-        <!-- チャート下の説明エリア -->
         <div style="font-size: 0.8rem; color: #666; background: #f9f9f9; padding: 12px; border-radius: 6px; margin-top: 15px; border: 1px solid #eee;">
             <strong>【チャートの仕様】</strong><br>
             <ul style="margin: 5px 0 0 20px; padding: 0;">

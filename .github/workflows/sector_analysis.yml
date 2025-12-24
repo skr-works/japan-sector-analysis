@@ -25,16 +25,12 @@ jobs:
           pip install -r requirements.txt
 
       - name: Run sector analysis
-        env:
-          GCP_SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT }}
-          SHEET_URL: ${{ secrets.SHEET_URL }}
+        # GCP認証情報は不要になったため削除
         run: python sector_analysis.py
 
       - name: Run WordPress Publisher
         env:
-          # GCP情報
-          GCP_SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT }}
-          SHEET_URL: ${{ secrets.SHEET_URL }}
-          # WordPress情報 (まとめたSecretsを渡す)
+          # GCP情報は不要のため削除
+          # WordPress情報のみ渡す
           TOFU_WORDPRESS: ${{ secrets.TOFU_WORDPRESS }}
         run: python wordpress_publisher.py

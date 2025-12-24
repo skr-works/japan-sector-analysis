@@ -1,0 +1,32 @@
+name: Sector Trend Analysis
+
+on:
+  schedule:
+    # 毎日 UTC 06:40 (JST 15:40) に1回だけ実行
+    # 市場終了後に当日の確定終値を取得します
+    - cron: '40 6 * * *'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run sector analysis
+        env:
+          GCP_SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+          SHEET_URL: ${{ secrets.SHEET_URL }}
+        run: python sector_analysis.py

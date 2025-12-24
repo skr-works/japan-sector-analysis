@@ -46,10 +46,7 @@ def get_sheet_data():
 
 def process_data_for_chart(data):
     """
-    取得したデータを加工し、
-    1. パネル表示用の最新データ
-    2. チャート表示用の時系列データ(300日指数化)
-    を作成する
+    取得したデータを加工する
     """
     if not data:
         return None, None, None
@@ -62,10 +59,10 @@ def process_data_for_chart(data):
     df = df.sort_values(['日付', 'コード'])
 
     # --- 1. 最新データの抽出 (パネル用) ---
-    latest_date = df['日付'].max()
-    latest_df = df[df['日付'] == latest_date].copy()
+    # 修正: 全体でのMax日付ではなく、各コードごとの最新行を取得する（更新ズレによる欠落防止）
+    latest_df = df.sort_values('日付').groupby('コード').tail(1).copy()
     
-    # 業種コード順などでソートしたい場合はここで
+    # 表示順をコード順またはセクター名順に整える（ここではコード順）
     latest_df = latest_df.sort_values('コード')
 
     # --- 2. 時系列データの作成 (チャート用) ---
@@ -89,7 +86,7 @@ def process_data_for_chart(data):
     # Chart.js用にデータセットリスト化
     chart_datasets = []
     
-    # 色のリスト (17業種分を区別しやすいように回す)
+    # 色のリスト (視認性の高い色パレット)
     colors = [
         '#e6194b', '#3cb44b', '#ffe119', '#4363d8', '#f58231', 
         '#911eb4', '#46f0f0', '#f032e6', '#bcf60c', '#fabebe', 
@@ -104,10 +101,10 @@ def process_data_for_chart(data):
             "data": normalized_df[column].fillna(method='ffill').tolist(), # 欠損値は前日埋め
             "borderColor": color,
             "backgroundColor": color,
+            "borderWidth": 1.5,
+            "pointRadius": 0,
+            "pointHoverRadius": 4,
             "fill": False,
-            "borderWidth": 2,
-            "pointRadius": 0, # 通常時は点を描画しない（軽量化）
-            "pointHitRadius": 10, # タップ判定は大きく
             "tension": 0.1
         }
         chart_datasets.append(dataset)
@@ -115,27 +112,25 @@ def process_data_for_chart(data):
     return latest_df, chart_labels, chart_datasets
 
 def generate_html_content(latest_df, chart_labels, chart_datasets):
-    """HTMLコンテンツ（パネル＋チャート）を生成"""
+    """HTMLコンテンツ（パネル＋Chart.jsスクリプト）を生成"""
     
     if latest_df is None or latest_df.empty:
         return "<p>データがありません。</p>"
 
-    # 更新日時
-    last_update_str = latest_df['更新日時'].iloc[0] if '更新日時' in latest_df.columns else datetime.datetime.now().strftime('%Y-%m-%d %H:%M')
+    # 更新日時（データの最新日付を使用）
+    last_update_str = latest_df['日付'].max().strftime('%Y-%m-%d')
+
+    # 一意なID生成（キャッシュ対策）
+    chart_id = f"sectorChart_{random.randint(1000, 9999)}"
 
     # --- CSS (インライン) ---
-    # パネルグリッドレイアウト
-    style_grid = "display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 40px;"
-    
-    # パネル基本スタイル
-    style_card = "padding: 15px; border-radius: 8px; position: relative; box-shadow: 0 2px 4px rgba(0,0,0,0.08); text-decoration: none;"
-    
-    # チャートコンテナ
-    style_chart_container = "position: relative; height: 500px; width: 100%; margin-top: 20px;"
+    style_grid = "display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 30px;"
+    # パネルは白背景、影付きで見やすく
+    style_card = "padding: 12px; border-radius: 6px; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.1); border: 1px solid #eee;"
 
     html = f"""
-    <div style="font-family: sans-serif; max-width: 800px; margin: 0 auto;">
-        <p style="text-align: right; font-size: 0.8rem; color: #666;">最終更新: {last_update_str}</p>
+    <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 800px; margin: 0 auto;">
+        <p style="text-align: right; font-size: 0.8rem; color: #666; margin-bottom: 10px;">データ更新日: {last_update_str}</p>
         
         <!-- パネルエリア -->
         <div style="{style_grid}">
@@ -147,93 +142,83 @@ def generate_html_content(latest_df, chart_labels, chart_datasets):
         rsi = float(row['RSI'])
         bb = float(row['BB%B(過熱)'])
         
-        # 色とラベルの判定
-        # 初期値: 通常(白/グレー)
-        bg_color = "#f9f9f9" 
-        status_label = ""
-        status_style = ""
+        # --- ステータス判定 ---
+        # 背景色は白固定。文字と枠線でステータスを表示
+        status_text = "通常"
+        status_style = "color: #666; font-size: 0.75rem; background: #f0f0f0; padding: 2px 6px; border-radius: 3px;"
         
-        # 過熱判定 (薄い赤)
+        # 過熱判定
         if rsi >= 70 or bb > 1.0:
-            bg_color = "#ffebee"
-            status_label = "過熱"
-            status_style = "color: #c62828; font-weight: bold; font-size: 0.8rem; border: 1px solid #c62828; padding: 2px 6px; border-radius: 4px; background: #fff;"
+            status_text = "🔥 過熱"
+            status_style = "color: #d32f2f; font-weight: bold; font-size: 0.75rem; background: #ffebee; padding: 2px 6px; border-radius: 3px; border: 1px solid #ffcdd2;"
             
-        # 割安判定 (薄い青)
+        # 割安判定
         elif rsi <= 30 or bb < 0:
-            bg_color = "#e3f2fd"
-            status_label = "割安"
-            status_style = "color: #1565c0; font-weight: bold; font-size: 0.8rem; border: 1px solid #1565c0; padding: 2px 6px; border-radius: 4px; background: #fff;"
+            status_text = "❄️ 割安"
+            status_style = "color: #1565c0; font-weight: bold; font-size: 0.75rem; background: #e3f2fd; padding: 2px 6px; border-radius: 3px; border: 1px solid #bbdefb;"
 
-        # 前日比の色
+        # 前日比の文字色
         change_color = "#d32f2f" if change > 0 else ("#1976d2" if change < 0 else "#333")
         sign = "+" if change > 0 else ""
         
         html += f"""
-        <div style="{style_card} background-color: {bg_color};">
-            <div style="font-weight: bold; font-size: 0.95rem; margin-bottom: 5px; color: #333;">{sector}</div>
-            <div style="font-size: 1.6rem; font-weight: bold; color: {change_color}; margin-bottom: 8px;">
-                {sign}{change}%
+        <div style="{style_card}">
+            <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 5px;">
+                <div style="font-weight: bold; font-size: 0.9rem; color: #333;">{sector}</div>
             </div>
-            <div style="text-align: right; min-height: 20px;">
-                <span style="{status_style}">{status_label}</span>
+            <div style="display: flex; justify-content: space-between; align-items: flex-end;">
+                <div style="font-size: 1.4rem; font-weight: bold; color: {change_color}; line-height: 1;">
+                    {sign}{change}<span style="font-size: 0.8rem;">%</span>
+                </div>
+                <div style="{status_style}">{status_text}</div>
             </div>
         </div>
         """
 
-    html += """
-        </div>
-        <!-- チャートエリア -->
-        <h3 style="border-left: 5px solid #333; padding-left: 10px; margin-bottom: 15px;">📊 300日推移チャート (起点=100)</h3>
-        <p style="font-size: 0.8rem; color: #666; margin-bottom: 10px;">
-            ※300営業日前を100とした指数チャートです。<br>
-            ※凡例(四角い色)をタップすると、その業種の表示/非表示を切り替えられます。
-        </p>
-        <div style="position: relative; width: 100%; height: 0; padding-bottom: 100%;">
-            <canvas id="sectorChart"></canvas>
-        </div>
-        
-        <!-- Chart.js CDN -->
-        <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-        
-        <script>
-    """
-
-    # PythonデータをJSON文字列として埋め込む
+    # PythonデータをJSON文字列化してJSに埋め込む
     json_labels = json.dumps(chart_labels)
     json_datasets = json.dumps(chart_datasets)
 
     html += f"""
-        document.addEventListener('DOMContentLoaded', function() {{
-            const ctx = document.getElementById('sectorChart').getContext('2d');
-            
-            // データ定義
-            const labels = {json_labels};
-            const datasets = {json_datasets};
-            
-            new Chart(ctx, {{
+        </div>
+        <!-- チャートエリア -->
+        <h3 style="font-size: 1.1rem; border-bottom: 2px solid #333; padding-bottom: 5px; margin-top: 40px; margin-bottom: 15px;">📊 300日推移チャート (起点=100)</h3>
+        <p style="font-size: 0.8rem; color: #666; margin-bottom: 15px;">
+            ※300営業日前を100とした指数チャートです。<br>
+            ※凡例の四角(■)をタップすると、その業種の表示/非表示を切り替えられます。
+        </p>
+        
+        <!-- Chart.js CDN -->
+        <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+        
+        <div style="position: relative; width: 100%; height: 500px; border: 1px solid #eee; border-radius: 4px; padding: 5px;">
+            <canvas id="{chart_id}"></canvas>
+        </div>
+        
+        <script>
+        (function() {{
+            const ctx = document.getElementById('{chart_id}').getContext('2d');
+            const myChart = new Chart(ctx, {{
                 type: 'line',
                 data: {{
-                    labels: labels,
-                    datasets: datasets
+                    labels: {json_labels},
+                    datasets: {json_datasets}
                 }},
                 options: {{
                     responsive: true,
-                    maintainAspectRatio: false, // 縦横比固定を解除
-                    aspectRatio: 1, // 正方形に近い比率
+                    maintainAspectRatio: false,
                     interaction: {{
                         mode: 'index',
                         intersect: false,
                     }},
                     plugins: {{
                         legend: {{
-                            position: 'bottom', // 凡例は下
+                            position: 'bottom',
                             labels: {{
-                                boxWidth: 12,
-                                padding: 10,
-                                font: {{
-                                    size: 11
-                                }}
+                                usePointStyle: true,
+                                boxWidth: 8,
+                                padding: 15,
+                                font: {{ size: 11 }}
                             }}
                         }},
                         tooltip: {{
@@ -243,34 +228,24 @@ def generate_html_content(latest_df, chart_labels, chart_datasets):
                     }},
                     scales: {{
                         y: {{
-                            title: {{
-                                display: true,
-                                text: '指数 (Start=100)'
-                            }},
-                            grid: {{
-                                color: '#eee'
-                            }}
+                            title: {{ display: true, text: '指数' }},
+                            grid: {{ color: '#f0f0f0' }}
                         }},
                         x: {{
-                            grid: {{
-                                display: false
-                            }},
-                            ticks: {{
-                                maxTicksLimit: 8,
-                                maxRotation: 0
-                            }}
+                            grid: {{ display: false }},
+                            ticks: {{ maxTicksLimit: 10 }}
                         }}
                     }},
                     elements: {{
                         point: {{
                             radius: 0,
-                            hitRadius: 15,
+                            hitRadius: 10,
                             hoverRadius: 5
                         }}
                     }}
                 }}
             }});
-        }});
+        }})();
         </script>
     </div>
     """

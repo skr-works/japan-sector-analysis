@@ -1,48 +1,28 @@
 import os
 import json
-import gspread
 import requests
 import base64
-from google.oauth2.service_account import Credentials
 import datetime
 import pandas as pd
 import random
 
-def get_sheet_data():
-    """Googleスプレッドシートからデータを取得する"""
-    scope = ['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive']
-    
-    # --- GCP認証情報の読み込み ---
-    creds_json = None
-    env_sa = os.environ.get('GCP_SERVICE_ACCOUNT')
-    
-    if env_sa:
-        try:
-            creds_json = json.loads(env_sa)
-        except json.JSONDecodeError as e:
-            print(f"JSON Decode Error: {e}")
-    
-    if not creds_json and os.path.exists('service_account.json'):
-        with open('service_account.json', 'r') as f:
-            creds_json = json.load(f)
+# gspread や google.oauth2 などのスプレッドシート関連ライブラリは不要になりました
 
-    if not creds_json:
-        raise Exception("GCP認証情報が見つかりません。SecretsのGCP_SERVICE_ACCOUNTを確認してください。")
+def get_analysis_data(file_path='sector_data.json'):
+    """
+    前工程(sector_analysis.py)で生成されたJSONファイルからデータを読み込む
+    スプレッドシートを経由しないため、認証不要かつ高速
+    """
+    if not os.path.exists(file_path):
+        # ファイルがない場合はエラー
+        raise FileNotFoundError(f"データファイル '{file_path}' が見つかりません。sector_analysis.py でJSON出力が行われているか確認してください。")
 
-    creds = Credentials.from_service_account_info(creds_json, scopes=scope)
-    gc = gspread.authorize(creds)
-
-    # --- シートを開く ---
-    sheet_url = os.environ.get('SHEET_URL')
-    if not sheet_url:
-        raise Exception("SHEET_URLが設定されていません")
-
-    wb = gc.open_by_url(sheet_url)
-    worksheet = wb.worksheet("業種分析")
-    
-    # 全データを取得
-    data = worksheet.get_all_records()
-    return data
+    try:
+        with open(file_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        return data
+    except Exception as e:
+        raise Exception(f"JSONファイルの読み込みに失敗しました: {e}")
 
 def process_data_for_chart(data):
     """
@@ -55,7 +35,11 @@ def process_data_for_chart(data):
     df = pd.DataFrame(data)
     
     # 日付型変換
-    df['日付'] = pd.to_datetime(df['日付'])
+    if '日付' in df.columns:
+        df['日付'] = pd.to_datetime(df['日付'])
+    else:
+        # 日付カラムがない場合の安全策（ありえないはずだが）
+        return None, None, None, None
 
     # --- 重複データの排除 ---
     sort_cols = ['日付', 'コード']
@@ -154,7 +138,7 @@ def generate_html_content(latest_df, chart_labels, chart_datasets, overheated_to
         <p style="text-align: right; font-size: 0.8rem; color: #666; margin-bottom: 10px;">データ更新日: {last_update_str}</p>
         
         <!-- パネルエリア見出し (装飾なし) -->
-        <h3 style="font-size: 1.1rem; margin-bottom: 15px; color: #333;">業種別トレンド・シグナル一覧</h3>
+        <h3 style="font-size: 1.1rem; margin-bottom: 15px; color: #333;">短期の過熱割安判定パネル</h3>
 
         <!-- パネルエリア -->
         <div style="{style_grid}">
@@ -183,7 +167,7 @@ def generate_html_content(latest_df, chart_labels, chart_datasets, overheated_to
         change_color = "#d32f2f" if change > 0 else ("#1976d2" if change < 0 else "#333")
         sign = "+" if change > 0 else ""
         
-        # パネルHTML: ラベル追加と詳細数値の追加
+        # パネルHTML
         html += f"""
         <div style="{style_card}">
             <div style="font-weight: bold; font-size: 0.95rem; color: #333; margin-bottom: 8px;">{sector}</div>
@@ -239,7 +223,7 @@ def generate_html_content(latest_df, chart_labels, chart_datasets, overheated_to
 
     html += f"""
         <!-- チャートエリア見出し (装飾なし) -->
-        <h3 style="font-size: 1.1rem; margin-top: 40px; margin-bottom: 15px; color: #333;">300日パフォーマンス推移チャート (起点=100)</h3>
+        <h3 style="font-size: 1.1rem; margin-top: 40px; margin-bottom: 15px; color: #333;">長期の過熱割安判定チャート(起点100)</h3>
         
         {top3_html}
         
@@ -372,7 +356,8 @@ def update_wordpress(content):
 if __name__ == "__main__":
     try:
         print("データを取得中...")
-        raw_data = get_sheet_data()
+        # ファイルからデータを取得する形に変更
+        raw_data = get_analysis_data()
         
         print("データを加工中(パネル＆チャート)...")
         latest_df, chart_labels, chart_datasets, overheated_top3 = process_data_for_chart(raw_data)

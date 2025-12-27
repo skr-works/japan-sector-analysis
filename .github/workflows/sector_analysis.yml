@@ -3,7 +3,8 @@ name: Sector Trend Analysis
 on:
   schedule:
     # 毎日 UTC 06:40 (JST 15:40) に1回だけ実行
-    - cron: '40 6 * * *'
+    # 変更: 末尾を '*' から '1-5' にし、土日を除外 (月〜金のみトリガー)
+    - cron: '40 6 * * 1-5'
   workflow_dispatch:
 
 jobs:
@@ -23,14 +24,20 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
+          # 変更: 祝日判定用ライブラリを追加
+          pip install jpholiday
 
       - name: Run sector analysis
         # GCP認証情報は不要になったため削除
-        run: python sector_analysis.py
+        # 変更: 祝日なら実行せずスキップする判定を追加
+        run: |
+          python -c "import jpholiday, datetime, sys; JST=datetime.timezone(datetime.timedelta(hours=9)); sys.exit(1) if jpholiday.is_holiday(datetime.datetime.now(JST)) else sys.exit(0)" && python sector_analysis.py || echo "Holiday skip: sector_analysis"
 
       - name: Run WordPress Publisher
         env:
           # GCP情報は不要のため削除
           # WordPress情報のみ渡す
           TOFU_WORDPRESS: ${{ secrets.TOFU_WORDPRESS }}
-        run: python wordpress_publisher.py
+        # 変更: 分析同様、祝日なら投稿処理もスキップする判定を追加
+        run: |
+          python -c "import jpholiday, datetime, sys; JST=datetime.timezone(datetime.timedelta(hours=9)); sys.exit(1) if jpholiday.is_holiday(datetime.datetime.now(JST)) else sys.exit(0)" && python wordpress_publisher.py || echo "Holiday skip: wordpress_publisher"

@@ -7,6 +7,9 @@ on:
     - cron: '40 6 * * 1-5'
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -14,6 +17,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v4
@@ -41,3 +46,21 @@ jobs:
         # 変更: 分析同様、祝日なら投稿処理もスキップする判定を追加
         run: |
           python -c "import jpholiday, datetime, sys; JST=datetime.timezone(datetime.timedelta(hours=9)); sys.exit(1) if jpholiday.is_holiday(datetime.datetime.now(JST)) else sys.exit(0)" && python wordpress_publisher.py || echo "Holiday skip: wordpress_publisher"
+
+      - name: Prevent 60-day workflow suspension
+        run: |
+          last_commit_time=$(git log -1 --format=%ct)
+          current_time=$(date +%s)
+          diff_days=$(( (current_time - last_commit_time) / 86400 ))
+          
+          echo "最終更新から ${diff_days} 日経過しています。"
+          
+          if [ "$diff_days" -ge 50 ]; then
+            echo "50日以上経過しているため、ワークフロー停止回避の空コミットを作成します。"
+            git config --global user.name "github-actions[bot]"
+            git config --global user.email "github-actions[bot]@users.noreply.github.com"
+            git commit --allow-empty -m "chore: keep alive to prevent workflow suspension"
+            git push
+          else
+            echo "空コミットは不要です。"
+          fi
